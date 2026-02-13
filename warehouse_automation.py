@@ -177,8 +177,23 @@ class DataWarehouseAutomation:
         conn.close()
         logger.info(f"Sample data loaded: {len(sample_data)} records")
     
+    # Allowlist of valid table and column names for SQL injection prevention
+    VALID_TABLES = {'staging_sales', 'dim_customers', 'dim_products', 'dim_time', 'fact_sales', 'etl_jobs'}
+
+    def _validate_identifier(self, name: str, kind: str = 'table') -> str:
+        """Validate a SQL identifier against known schema to prevent SQL injection."""
+        import re
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name):
+            raise ValueError(f"Invalid {kind} name: {name!r}")
+        if kind == 'table' and name not in self.VALID_TABLES:
+            raise ValueError(f"Unknown table: {name!r}. Valid tables: {self.VALID_TABLES}")
+        return name
+
     def data_quality_check(self, table_name: str) -> Dict[str, Any]:
         """Perform data quality checks"""
+        # Validate table name against allowlist to prevent SQL injection
+        self._validate_identifier(table_name, 'table')
+
         conn = sqlite3.connect(self.db_path)
         
         quality_report = {
@@ -196,12 +211,14 @@ class DataWarehouseAutomation:
             cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
             quality_report['total_records'] = cursor.fetchone()[0]
             
-            # Get table info
+            # Get table info — used to discover column names from schema
             cursor.execute(f"PRAGMA table_info({table_name})")
             columns = cursor.fetchall()
             
             for column in columns:
                 col_name = column[1]
+                # Validate column name from PRAGMA result
+                self._validate_identifier(col_name, 'column')
                 
                 # Check for nulls
                 cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {col_name} IS NULL")
@@ -237,6 +254,7 @@ class DataWarehouseAutomation:
         """Execute ETL process"""
         job_id = str(uuid.uuid4())
         start_time = datetime.now()
+        conn = None
         
         try:
             conn = sqlite3.connect(self.db_path)
@@ -327,23 +345,29 @@ class DataWarehouseAutomation:
             ''', ('COMPLETED', end_time, records_processed, errors_count, job_id))
             
             conn.commit()
-            conn.close()
             
             logger.info(f"ETL job {job_id} completed. Processed: {records_processed}, Errors: {errors_count}")
             
         except Exception as e:
             # Update job status to failed
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE etl_jobs 
-                SET status = ?, end_time = ?, error_details = ?
-                WHERE job_id = ?
-            ''', ('FAILED', datetime.now(), str(e), job_id))
-            conn.commit()
-            conn.close()
+            try:
+                fail_conn = sqlite3.connect(self.db_path)
+                fail_cursor = fail_conn.cursor()
+                fail_cursor.execute('''
+                    UPDATE etl_jobs 
+                    SET status = ?, end_time = ?, error_details = ?
+                    WHERE job_id = ?
+                ''', ('FAILED', datetime.now(), str(e), job_id))
+                fail_conn.commit()
+                fail_conn.close()
+            except Exception:
+                pass
             
             logger.error(f"ETL job {job_id} failed: {str(e)}")
+        
+        finally:
+            if conn is not None:
+                conn.close()
         
         return job_id
     

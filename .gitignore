@@ -8,3 +8,11 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.db
+venv/
+.env
+data/
