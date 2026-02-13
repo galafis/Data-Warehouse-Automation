@@ -5,7 +5,6 @@
 library(ggplot2)
 library(dplyr)
 library(corrplot)
-library(plotly)
 
 # Data Analysis Class
 DataAnalyzer <- setRefClass("DataAnalyzer",
@@ -32,7 +31,9 @@ DataAnalyzer <- setRefClass("DataAnalyzer",
       
       # Visualization
       if(ncol(data) >= 2) {
-        p <- ggplot(data, aes_string(x = names(data)[1], y = names(data)[2])) +
+        x_col <- names(data)[1]
+        y_col <- names(data)[2]
+        p <- ggplot(data, aes(.data[[x_col]], .data[[y_col]])) +
           geom_point(alpha = 0.6) +
           geom_smooth(method = "lm") +
           theme_minimal() +
@@ -42,7 +43,7 @@ DataAnalyzer <- setRefClass("DataAnalyzer",
       
       results <<- list(
         summary = summary_stats,
-        correlation = if(exists("cor_matrix")) cor_matrix else NULL
+        correlation = if(exists("cor_matrix", where = environment())) cor_matrix else NULL
       )
     },
     
